@@ -37,7 +37,7 @@ pub struct ExecuteTrade<'info> {
 
     #[account(
         mut,
-        seeds = [VAULT_SEED, vault.owner.as_ref()],
+        seeds = [VAULT_SEED, vault.owner.as_ref(), &[vault.vault_id]],
         bump = vault.bump,
     )]
     pub vault: Account<'info, MatkaVault>,

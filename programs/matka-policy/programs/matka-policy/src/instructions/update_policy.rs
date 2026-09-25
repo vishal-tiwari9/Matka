@@ -20,7 +20,7 @@ pub struct UpdatePolicy<'info> {
     pub owner: Signer<'info>,
 
     #[account(
-        seeds = [VAULT_SEED, owner.key().as_ref()],
+        seeds = [VAULT_SEED, vault.owner.as_ref(), &[vault.vault_id]],
         bump = vault.bump,
         has_one = owner @ MatkaError::NotOwner,
     )]
@@ -79,7 +79,8 @@ pub fn handler(ctx: Context<UpdatePolicy>, params: PolicyParams) -> Result<()> {
     }
 
     msg!(
-        "MatkaPolicy updated. max_single={} bps, min_stable={} bps, preipo_cap={} bps",
+        "MatkaPolicy updated for Vault {}. max_single={} bps, min_stable={} bps, preipo_cap={} bps",
+        ctx.accounts.vault.vault_id,
         policy.max_single_asset_bps,
         policy.min_stable_reserve_bps,
         policy.max_preipo_exposure_bps

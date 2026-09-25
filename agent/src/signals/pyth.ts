@@ -1,4 +1,4 @@
-import axios from "axios";
+import { HermesClient } from "@pythnetwork/hermes-client";
 
 // ============================================================
 //  pyth.ts — Pyth Network Integration
@@ -15,7 +15,8 @@ import axios from "axios";
 //  On mainnet: requires Pyth Pro for equity feeds.
 // ============================================================
 
-const PYTH_ENDPOINT = process.env.PYTH_ENDPOINT!;
+// Use the new dourolabs hermes endpoint or the env variable
+const PYTH_ENDPOINT = "https://hermes.pyth.network";
 
 // Pyth Price Feed IDs for equities (mainnet)
 export const PYTH_FEED_IDS = {
@@ -35,45 +36,48 @@ export interface PythPrice {
   isStale: boolean;         // true if older than max_oracle_age_secs
 }
 
+// Initialize Hermes Client
+const hermes = new HermesClient(PYTH_ENDPOINT);
+
 /**
  * Fetch latest price from Pyth Hermes REST API.
  * Hermes is Pyth's off-chain price aggregator.
- * On mainnet-fork testing, the on-chain Pyth accounts are cloned
- * from mainnet so the Smart Contract reads real prices locally.
  */
 export async function getPythPrice(
   symbol: keyof typeof PYTH_FEED_IDS,
   maxAgeSecs: number = 60
 ): Promise<PythPrice> {
   const feedId = PYTH_FEED_IDS[symbol];
-  const res = await axios.get(
-    `${PYTH_ENDPOINT}/api/latest_price_feeds`,
-    {
-      params: { ids: [feedId] },
-      timeout: 8_000,
-    }
-  );
-
-  const feed = res.data?.[0];
-  if (!feed) throw new Error(`Pyth: no price data for ${symbol}`);
-
-  const price = parseFloat(feed.price?.price ?? feed.ema_price?.price ?? "0") *
-    Math.pow(10, feed.price?.expo ?? -8);
-  const conf = parseFloat(feed.price?.conf ?? "0") *
-    Math.pow(10, feed.price?.expo ?? -8);
-  const publishTime = parseInt(feed.price?.publish_time ?? "0");
-  const ageSeconds = Math.floor(Date.now() / 1000) - publishTime;
-  const confBps = price > 0 ? Math.round((conf / price) * 10_000) : 9999;
-
-  return {
-    symbol,
-    price,
-    conf,
-    confBps,
-    publishTime,
-    ageSeconds,
-    isStale: ageSeconds > maxAgeSecs,
-  };
+  
+  try {
+    const res = await hermes.getLatestPriceUpdates([feedId]);
+    const feed = res.parsed?.[0];
+    
+    if (!feed || !feed.price) throw new Error(`Pyth: no price data for ${symbol}`);
+    
+    // Pyth prices are integers scaled by an exponent
+    const priceStr = feed.price.price;
+    const expo = feed.price.expo;
+    const confStr = feed.price.conf;
+    const publishTime = feed.price.publishTime;
+    
+    const price = Number(priceStr) * Math.pow(10, expo);
+    const conf = Number(confStr) * Math.pow(10, expo);
+    const ageSeconds = Math.floor(Date.now() / 1000) - publishTime;
+    const confBps = price > 0 ? Math.round((conf / price) * 10_000) : 9999;
+    
+    return {
+      symbol,
+      price,
+      conf,
+      confBps,
+      publishTime,
+      ageSeconds,
+      isStale: ageSeconds > maxAgeSecs,
+    };
+  } catch (error: any) {
+    throw new Error(`Pyth fetch failed: ${error.message}`);
+  }
 }
 
 /**

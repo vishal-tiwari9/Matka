@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 // ============================================================
 //  MatkaVault — the on-chain treasury for one user
 //
-//  One vault per user wallet.  PDA seeds: [b"vault", owner].
+//  One vault per user wallet.  PDA seeds: [b"vault", owner, vault_id].
 //  The vault is the *only* authority over deposited funds.
 //  The AI agent wallet is stored here as `agent` — it can
 //  call execute_trade but can NEVER withdraw to an arbitrary
@@ -12,12 +12,16 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(Debug)]
 pub struct MatkaVault {
+    /// Identifier for multiple vaults (0 = Main, >0 = Sub Vaults)
+    pub vault_id: u8,
     /// The user who owns this vault (signs deposit / withdraw)
     pub owner: Pubkey,
     /// The delegated AI agent wallet (signs execute_trade only)
     pub agent: Pubkey,
     /// Vault bump for PDA re-derivation
     pub bump: u8,
+    /// True if this is an AI agent's sub-vault
+    pub is_sub_vault: bool,
     /// Total USDC deposited (raw 6-decimal units, mirrors Token-2022)
     pub total_deposited_usdc: u64,
     /// Amount currently deployed to Kamino as collateral (tracked for JIT unwind)
@@ -30,9 +34,11 @@ pub struct MatkaVault {
 
 impl MatkaVault {
     pub const LEN: usize = 8
+        + 1   // vault_id
         + 32  // owner
         + 32  // agent
         + 1   // bump
+        + 1   // is_sub_vault
         + 8   // total_deposited_usdc
         + 8   // deployed_to_yield
         + 8   // current_preipo_usdc

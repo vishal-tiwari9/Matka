@@ -33,25 +33,17 @@ export default function LandingPage() {
           }} />
           <div>
             <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.5 }}>Matka Protocol</span>
-            <span style={{ display: "block", fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: 1.5 }}>
-              Autonomous Robo-Portfolios
-            </span>
+          
           </div>
         </div>
 
         {/* Center Links */}
-        <div style={{ display: "flex", gap: 28, fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.7)" }}>
-          <a href="#problem" style={{ color: "inherit", textDecoration: "none" }}>The Problem</a>
-          <a href="#solution" style={{ color: "inherit", textDecoration: "none" }}>Architecture</a>
-          <a href="#tracks" style={{ color: "inherit", textDecoration: "none" }}>Sponsor Tracks</a>
-          <a href="#how-it-works" style={{ color: "inherit", textDecoration: "none" }}>How it Works</a>
-        </div>
-
+       
         {/* Right CTA */}
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <ClientWalletButton />
           <Link
-            href="/dashboard"
+            href="/home"
             style={{
               background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
               color: "white",
@@ -138,7 +130,7 @@ export default function LandingPage() {
 
           <div style={{ display: "flex", justifyContent: "center", gap: 16 }}>
             <Link
-              href="/dashboard"
+              href="/home"
               style={{
                 background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
                 color: "white",
@@ -335,7 +327,7 @@ export default function LandingPage() {
             Open the terminal, configure your custom robo-vault, and monitor the live AI agent thoughts stream in real time.
           </p>
           <Link
-            href="/dashboard"
+            href="/home"
             style={{
               background: "white",
               color: "black",

@@ -11,9 +11,9 @@ export const VAULT_SEED = anchor.utils.bytes.utf8.encode("vault");
 export const POLICY_SEED = anchor.utils.bytes.utf8.encode("policy");
 
 // ── PDA Helpers ───────────────────────────────────────────────
-export function getVaultPda(ownerPubkey: PublicKey): [PublicKey, number] {
+export function getVaultPda(ownerPubkey: PublicKey, vaultId: number = 0): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [VAULT_SEED, ownerPubkey.toBuffer()],
+    [VAULT_SEED, ownerPubkey.toBuffer(), Buffer.from([vaultId])],
     MATKA_PROGRAM_ID
   );
 }
@@ -35,9 +35,11 @@ export function getMatkaProgram(
 
 // ── On-chain data types (snake_case matches IDL) ──────────────
 export interface VaultState {
+  vault_id: number;
   owner: PublicKey;
   agent: PublicKey;
   bump: number;
+  is_sub_vault: boolean;
   total_deposited_usdc: anchor.BN;
   deployed_to_yield: anchor.BN;
   current_preipo_usdc: anchor.BN;
@@ -47,6 +49,7 @@ export interface VaultState {
 export interface PolicyState {
   vault: PublicKey;
   bump: number;
+  is_sub_vault: boolean;
   max_single_asset_bps: number;
   min_stable_reserve_bps: number;
   max_preipo_exposure_bps: number;

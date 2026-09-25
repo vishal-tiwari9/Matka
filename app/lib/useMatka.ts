@@ -20,9 +20,10 @@ interface UseMatkaReturn {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  initializeVault: (agentPubkey: string) => Promise<string>;
+  initializeVault: (agentPubkey: string, isSubVault?: boolean) => Promise<string>;
   deposit: (amountUsdc: number) => Promise<string>;
   withdraw: () => Promise<string>;
+  fundSubVault: (subVaultId: number, amountUsdc: number) => Promise<string>;
   updatePolicy: (params: {
     max_preipo_exposure_bps?: number;
     max_single_asset_bps?: number;
@@ -32,7 +33,7 @@ interface UseMatkaReturn {
   }) => Promise<string>;
 }
 
-export function useMatka(): UseMatkaReturn {
+export function useMatka(vaultId: number = 0): UseMatkaReturn {
   const { connection } = useConnection();
   const wallet = useWallet();
 
@@ -63,7 +64,7 @@ export function useMatka(): UseMatkaReturn {
       const provider = getProvider();
       if (!provider) return;
       const program = getMatkaProgram(provider);
-      const [vaultPda] = getVaultPda(wallet.publicKey);
+      const [vaultPda] = getVaultPda(wallet.publicKey, vaultId);
       const [policyPda] = getPolicyPda(vaultPda);
 
       const vaultInfo = await connection.getAccountInfo(vaultPda);
@@ -83,13 +84,13 @@ export function useMatka(): UseMatkaReturn {
       setPolicy(fetchedPolicy as PolicyState);
       setVaultExists(true);
     } catch (e: any) {
-      console.error("refresh error:", e);
+      console.error(`refresh error for vaultId ${vaultId}:`, e);
       setError(e?.message ?? "Unknown error fetching vault");
       setVaultExists(false);
     } finally {
       setLoading(false);
     }
-  }, [wallet.publicKey, connection, getProvider]);
+  }, [wallet.publicKey, connection, getProvider, vaultId]);
 
   useEffect(() => {
     if (wallet.publicKey) {
@@ -100,21 +101,21 @@ export function useMatka(): UseMatkaReturn {
       setVaultExists(false);
       setError(null);
     }
-  }, [wallet.publicKey]);
+  }, [wallet.publicKey, vaultId, refresh]);
 
   // ── initializeVault ───────────────────────────────────────────
   const initializeVault = useCallback(
-    async (agentPubkeyStr: string): Promise<string> => {
+    async (agentPubkeyStr: string, isSubVault: boolean = false): Promise<string> => {
       const provider = getProvider();
       if (!provider || !wallet.publicKey) throw new Error("Wallet not connected");
 
       const program = getMatkaProgram(provider);
-      const [vaultPda] = getVaultPda(wallet.publicKey);
+      const [vaultPda] = getVaultPda(wallet.publicKey, vaultId);
       const [policyPda] = getPolicyPda(vaultPda);
       const agentPubkey = new anchor.web3.PublicKey(agentPubkeyStr);
 
       const tx = await program.methods
-        .initializeVault(agentPubkey)
+        .initializeVault(vaultId, isSubVault, agentPubkey)
         .accounts({
           owner: wallet.publicKey,
           vault: vaultPda,
@@ -126,7 +127,7 @@ export function useMatka(): UseMatkaReturn {
       await refresh();
       return tx;
     },
-    [wallet.publicKey, getProvider, refresh]
+    [wallet.publicKey, getProvider, refresh, vaultId]
   );
 
   // ── deposit ───────────────────────────────────────────────────
@@ -136,7 +137,7 @@ export function useMatka(): UseMatkaReturn {
       if (!provider || !wallet.publicKey) throw new Error("Wallet not connected");
 
       const program = getMatkaProgram(provider);
-      const [vaultPda] = getVaultPda(wallet.publicKey);
+      const [vaultPda] = getVaultPda(wallet.publicKey, vaultId);
       const [policyPda] = getPolicyPda(vaultPda);
 
       const rawAmount = new anchor.BN(Math.round(amountUsdc * 1_000_000));
@@ -153,16 +154,16 @@ export function useMatka(): UseMatkaReturn {
       await refresh();
       return tx;
     },
-    [wallet.publicKey, getProvider, refresh]
+    [wallet.publicKey, getProvider, refresh, vaultId]
   );
 
-  // ── withdraw ──────────────────────────────────────────────────
+  // ── withdraw / liquidate ──────────────────────────────────────
   const withdraw = useCallback(async (): Promise<string> => {
     const provider = getProvider();
     if (!provider || !wallet.publicKey) throw new Error("Wallet not connected");
 
     const program = getMatkaProgram(provider);
-    const [vaultPda] = getVaultPda(wallet.publicKey);
+    const [vaultPda] = getVaultPda(wallet.publicKey, vaultId);
     const [policyPda] = getPolicyPda(vaultPda);
 
     const tx = await program.methods
@@ -176,7 +177,34 @@ export function useMatka(): UseMatkaReturn {
 
     await refresh();
     return tx;
-  }, [wallet.publicKey, getProvider, refresh]);
+  }, [wallet.publicKey, getProvider, refresh, vaultId]);
+
+  // ── fundSubVault ──────────────────────────────────────────────
+  const fundSubVault = useCallback(
+    async (subVaultId: number, amountUsdc: number): Promise<string> => {
+      const provider = getProvider();
+      if (!provider || !wallet.publicKey) throw new Error("Wallet not connected");
+
+      const program = getMatkaProgram(provider);
+      const [mainVaultPda] = getVaultPda(wallet.publicKey, 0); // Main Vault is always 0
+      const [subVaultPda] = getVaultPda(wallet.publicKey, subVaultId);
+
+      const rawAmount = new anchor.BN(Math.round(amountUsdc * 1_000_000));
+
+      const tx = await program.methods
+        .fundSubVault(subVaultId, rawAmount)
+        .accounts({
+          owner: wallet.publicKey,
+          mainVault: mainVaultPda,
+          subVault: subVaultPda,
+        })
+        .rpc();
+
+      await refresh();
+      return tx;
+    },
+    [wallet.publicKey, getProvider, refresh]
+  );
 
   // ── updatePolicy ──────────────────────────────────────────────
   const updatePolicy = useCallback(
@@ -191,7 +219,7 @@ export function useMatka(): UseMatkaReturn {
       if (!provider || !wallet.publicKey) throw new Error("Wallet not connected");
 
       const program = getMatkaProgram(provider);
-      const [vaultPda] = getVaultPda(wallet.publicKey);
+      const [vaultPda] = getVaultPda(wallet.publicKey, vaultId);
       const [policyPda] = getPolicyPda(vaultPda);
 
       const tx = await program.methods
@@ -218,7 +246,7 @@ export function useMatka(): UseMatkaReturn {
       await refresh();
       return tx;
     },
-    [wallet.publicKey, getProvider, refresh]
+    [wallet.publicKey, getProvider, refresh, vaultId]
   );
 
   return {
@@ -231,6 +259,7 @@ export function useMatka(): UseMatkaReturn {
     initializeVault,
     deposit,
     withdraw,
+    fundSubVault,
     updatePolicy,
   };
 }

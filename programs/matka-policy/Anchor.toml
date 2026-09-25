@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-matka_policy = "DPue9pkxExeSKCPQutH6tnDMAkYeGn1nzKcsc6wQLBr"
+matka_policy = "HZWTgCyrcrhttgf3mQuMnKpf8E8RVnzjP1Yb3zm9dfNS"
 
 [registry]
 url = "https://api.apr.dev"

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::constants::*;
 use crate::errors::MatkaError;
-use crate::state::{MatkaPolicy, MatkaVault, PolicyParams};
+use crate::state::{MatkaPolicy, MatkaVault};
 
 // ============================================================
 //  initialize_vault
@@ -15,6 +15,7 @@ use crate::state::{MatkaPolicy, MatkaVault, PolicyParams};
 // ============================================================
 
 #[derive(Accounts)]
+#[instruction(vault_id: u8)]
 pub struct InitializeVault<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -23,7 +24,7 @@ pub struct InitializeVault<'info> {
         init,
         payer = owner,
         space = MatkaVault::LEN,
-        seeds = [VAULT_SEED, owner.key().as_ref()],
+        seeds = [VAULT_SEED, owner.key().as_ref(), &[vault_id]],
         bump,
     )]
     pub vault: Account<'info, MatkaVault>,
@@ -40,11 +41,13 @@ pub struct InitializeVault<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<InitializeVault>, agent: Pubkey) -> Result<()> {
+pub fn handler(ctx: Context<InitializeVault>, vault_id: u8, is_sub_vault: bool, agent: Pubkey) -> Result<()> {
     let vault = &mut ctx.accounts.vault;
     let policy = &mut ctx.accounts.policy;
 
     // ── Vault setup ──────────────────────────────────────────
+    vault.vault_id = vault_id;
+    vault.is_sub_vault = is_sub_vault;
     vault.owner = ctx.accounts.owner.key();
     vault.agent = agent;
     vault.bump = ctx.bumps.vault;

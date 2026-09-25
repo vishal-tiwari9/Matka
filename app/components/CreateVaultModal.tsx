@@ -34,8 +34,8 @@ export default function CreateVaultModal({
   // Deposit amount
   const [depositAmount, setDepositAmount] = useState<number>(100);
   
-  // Agent Key
-  const [agentKey, setAgentKey] = useState("9ReYpRMdWLu4PKzibWmGfeoFztGk95NyWLto5j1Wvpk8");
+  // Agent Key (from ClawPump)
+  const [agentKey, setAgentKey] = useState("NWmwu9egdSow7qMMrLvKyQA4SoHgwFyauhSbszRwFRW");
   
   // Execution status
   const [step, setStep] = useState<"idle" | "creating" | "funding" | "done" | "error">("idle");

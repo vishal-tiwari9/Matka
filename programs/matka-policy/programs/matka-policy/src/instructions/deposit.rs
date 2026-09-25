@@ -22,7 +22,7 @@ pub struct Deposit<'info> {
 
     #[account(
         mut,
-        seeds = [VAULT_SEED, owner.key().as_ref()],
+        seeds = [VAULT_SEED, vault.owner.as_ref(), &[vault.vault_id]],
         bump = vault.bump,
         has_one = owner @ MatkaError::NotOwner,
     )]
@@ -51,8 +51,9 @@ pub fn handler(ctx: Context<Deposit>, amount_usdc: u64) -> Result<()> {
         .ok_or(MatkaError::ArithmeticOverflow)?;
 
     msg!(
-        "[Kamino → Deposit] {} USDC deployed to yield. Total AUM: {}",
+        "[Kamino → Deposit] {} USDC deployed to yield in Vault {}. Total AUM: {}",
         amount_usdc,
+        vault.vault_id,
         vault.total_deposited_usdc
     );
 
