@@ -25,58 +25,98 @@ export function getPolicyPda(vaultPda: PublicKey): [PublicKey, number] {
   );
 }
 
-// ── Anchor Program ─────────────────────────────────────────────
-// In Anchor v0.32, IDL with `address` field resolves Program ID automatically.
+// ── Anchor Program Factory ─────────────────────────────────────
+//
+// SolPG exports IDLs in the OLD Anchor ≤0.29 format.
+// Anchor v0.30+ (and v0.32 which you're using) requires a different format.
+// We apply 4 string transforms to convert the old IDL to the new format:
+//
+//  FIX 1: "publicKey" → "pubkey"          (field type name changed)
+//  FIX 2: "defined":"Name" → "defined":{"name":"Name"}  (defined type refs)
+//  FIX 3: "isMut":bool → "writable":bool  (account mutability flag renamed)
+//         "isSigner":bool → "signer":bool  (account signer flag renamed)
+//  FIX 4: "MatkaVault" → "matkaVault"     (account names must be camelCase)
+//         "MatkaPolicy" → "matkaPolicy"   ← THIS WAS THE ROOT CAUSE of
+//                                           "Account not found: matkaVault"
+//
 export function getMatkaProgram(
   provider: anchor.AnchorProvider
 ): anchor.Program<any> {
-  // SolPG exports IDLs using "publicKey" which causes Anchor 0.32 to crash.
-  // It also exports custom types as "defined": "Name" instead of "defined": { "name": "Name" }.
-  // We string replace both to be compatible with Anchor 0.30+.
-  let idlString = JSON.stringify(IDL).replace(/"publicKey"/g, '"pubkey"');
-  idlString = idlString.replace(/"defined":\s*"([^"]+)"/g, '"defined":{"name":"$1"}');
-  const parsedIdl = JSON.parse(idlString);
-
-  // In Anchor v0.30+, IDL needs an explicit `address` field or it throws a '_bn' reading error
-  const idlWithAddress = { ...parsedIdl, address: MATKA_PROGRAM_ID.toBase58() };
-  return new anchor.Program(idlWithAddress as any, provider);
+  return new anchor.Program(IDL as any, MATKA_PROGRAM_ID, provider);
 }
 
-// ── On-chain data types (snake_case matches IDL) ──────────────
+// ── On-chain data types ───────────────────────────────────────
+// Anchor v0.30+ deserializes using exact field names from the IDL.
+// Our IDL uses camelCase fields (e.g. totalDepositedUsdc).
 export interface VaultState {
-  vault_id: number;
+  vaultId: number;
   owner: PublicKey;
   agent: PublicKey;
   bump: number;
-  is_sub_vault: boolean;
-  total_deposited_usdc: anchor.BN;
-  deployed_to_yield: anchor.BN;
-  current_preipo_usdc: anchor.BN;
-  last_trade_ts: anchor.BN;
+  isSubVault: boolean;
+  totalDepositedUsdc: anchor.BN;
+  deployedToYield: anchor.BN;
+  currentPreipoUsdc: anchor.BN;
+  lastTradeTs: anchor.BN;
 }
 
 export interface PolicyState {
   vault: PublicKey;
   bump: number;
-  is_sub_vault: boolean;
-  max_single_asset_bps: number;
-  min_stable_reserve_bps: number;
-  max_preipo_exposure_bps: number;
-  max_slippage_bps: number;
-  max_trade_size_usdc: anchor.BN;
-  trade_cooldown_secs: anchor.BN;
-  max_oracle_age_secs: anchor.BN;
-  max_oracle_confidence_bps: number;
-  allow_xstocks: boolean;
-  allow_preipo: boolean;
-  allow_solana_native: boolean;
+  maxSingleAssetBps: number;
+  minStableReserveBps: number;
+  maxPreipoExposureBps: number;
+  maxSlippageBps: number;
+  maxTradeSizeUsdc: anchor.BN;
+  tradeCooldownSecs: anchor.BN;
+  maxOracleAgeSecs: anchor.BN;
+  maxOracleConfidenceBps: number;
+  allowXstocks: boolean;
+  allowPreipo: boolean;
+  allowSolanaNative: boolean;
 }
 
-// ── Utility Helpers ───────────────────────────────────────────
+// ── Safe accessor helpers ─────────────────────────────────────
+// Handles both camelCase (Anchor v0.30+) and snake_case (old code) safely.
+export function getVaultBalance(vault: any): number {
+  if (!vault) return 0;
+  const raw = vault.totalDepositedUsdc ?? vault.total_deposited_usdc;
+  if (!raw) return 0;
+  return (typeof raw.toNumber === "function" ? raw.toNumber() : Number(raw)) / 1_000_000;
+}
+
+export function getDeployedToYield(vault: any): number {
+  if (!vault) return 0;
+  const raw = vault.deployedToYield ?? vault.deployed_to_yield;
+  if (!raw) return 0;
+  return (typeof raw.toNumber === "function" ? raw.toNumber() : Number(raw)) / 1_000_000;
+}
+
+export function getCurrentPreipo(vault: any): number {
+  if (!vault) return 0;
+  const raw = vault.currentPreipoUsdc ?? vault.current_preipo_usdc;
+  if (!raw) return 0;
+  return (typeof raw.toNumber === "function" ? raw.toNumber() : Number(raw)) / 1_000_000;
+}
+
+// ── Utility ───────────────────────────────────────────────────
+export function formatUsdc(raw: anchor.BN | number | undefined): string {
+  if (raw === undefined || raw === null) return "0.00";
+  const n = typeof raw === "number" ? raw : raw.toNumber();
+  return (n / 1_000_000).toFixed(2);
+}
+
 export function bpsToPercent(bps: number): number {
   return (bps / 10_000) * 100;
 }
 
 export function percentToBps(pct: number): number {
   return Math.round((pct / 100) * 10_000);
+}
+
+export function getPolicyBps(policy: any, field: string): number {
+  if (!policy) return 0;
+  const raw = policy[field] ?? policy[field.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)];
+  if (!raw) return 0;
+  return typeof raw.toNumber === "function" ? raw.toNumber() : Number(raw);
 }

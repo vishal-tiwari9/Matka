@@ -20,11 +20,11 @@ export default function PolicySliders() {
   // Sync sliders from on-chain policy when available
   useEffect(() => {
     if (policy) {
-      const maxPre = (policy as any).maxPreipoExposureBps ?? policy.max_preipo_exposure_bps;
-      const maxSingle = (policy as any).maxSingleAssetBps ?? policy.max_single_asset_bps;
-      const minRes = (policy as any).minStableReserveBps ?? policy.min_stable_reserve_bps;
-      const xstocks = (policy as any).allowXstocks ?? policy.allow_xstocks;
-      const preipo = (policy as any).allowPreipo ?? policy.allow_preipo;
+      const maxPre = (policy as any).maxPreipoExposureBps;
+      const maxSingle = (policy as any).maxSingleAssetBps;
+      const minRes = (policy as any).minStableReserveBps;
+      const xstocks = (policy as any).allowXstocks;
+      const preipo = (policy as any).allowPreipo;
 
       if (typeof maxPre === "number") setMaxPreipo(bpsToPercent(maxPre));
       if (typeof maxSingle === "number") setMaxSingleAsset(bpsToPercent(maxSingle));
@@ -40,11 +40,11 @@ export default function PolicySliders() {
     setLastTx(null);
     try {
       const tx = await updatePolicy({
-        max_preipo_exposure_bps: percentToBps(maxPreipo),
-        max_single_asset_bps: percentToBps(maxSingleAsset),
-        min_stable_reserve_bps: percentToBps(minStableReserve),
-        allow_xstocks: allowXstocks,
-        allow_preipo: allowPreipo,
+        maxPreipoExposureBps: percentToBps(maxPreipo),
+        maxSingleAssetBps: percentToBps(maxSingleAsset),
+        minStableReserveBps: percentToBps(minStableReserve),
+        allowXstocks: allowXstocks,
+        allowPreipo: allowPreipo,
       });
       setLastTx(tx);
     } catch (e: any) {

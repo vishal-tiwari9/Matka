@@ -5,25 +5,29 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import Link from "next/link";
 import { usePreStocks } from "../lib/usePreStocks";
 import { useMatka } from "../lib/useMatka";
+import { getVaultBalance } from "../lib/program";
 import ClientWalletButton from "../components/ClientWalletButton";
 
-// ClawPump agent public key — your single agent key
-const AGENT_PUBKEY = "11111111111111111111111111111111"; // Replace with your real ClawPump wallet pubkey
+// Replace with your real ClawPump wallet pubkey
+const AGENT_PUBKEY = "NWmwu9egdSow7qMMrLvKyQA4SoHgwFyauhSbszRwFRW";
 
 const CATEGORIES = {
   "Patient Investor": {
     discount: 20, max_trade_pct: 15, max_preipo_pct: 20,
-    cooldown: 3600, slippage: 50, description: "Low frequency, only buys at deep discounts >20%"
+    cooldown: 3600, slippage: 50,
+    description: "Low frequency. Only buys at deep discounts >20%.",
   },
   "Active Trader": {
     discount: 12, max_trade_pct: 25, max_preipo_pct: 15,
-    cooldown: 300, slippage: 100, description: "Medium frequency, buys at 12%+ discount"
+    cooldown: 300, slippage: 100,
+    description: "Medium frequency. Buys at 12%+ discount.",
   },
   "Signal Follower": {
     discount: 8, max_trade_pct: 40, max_preipo_pct: 10,
-    cooldown: 60, slippage: 150, description: "High frequency, follows signals aggressively"
+    cooldown: 60, slippage: 150,
+    description: "High frequency. Follows signals aggressively.",
   },
-};
+} as const;
 
 export default function AgentsPage() {
   const { connected } = useWallet();
@@ -35,11 +39,10 @@ export default function AgentsPage() {
   const [category, setCategory] = useState<keyof typeof CATEGORIES>("Active Trader");
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState("");
+  const [stepMsg, setStepMsg] = useState("");
 
   const selectedRules = CATEGORIES[category];
-  const mainBalance = mainVault.vault
-    ? mainVault.vault.total_deposited_usdc.toNumber() / 1_000_000
-    : 0;
+  const mainBalance = getVaultBalance(mainVault.vault);
 
   if (!connected) return (
     <div className="p-8 text-center mt-20">
@@ -49,50 +52,61 @@ export default function AgentsPage() {
   );
 
   const handleCreate = async () => {
-    setError("");
+    setError(""); setStepMsg("");
     if (!name.trim()) return setError("Agent name is required");
     const amountNum = parseFloat(amount);
-    if (!amountNum || amountNum <= 0) return setError("Enter a valid amount");
-    if (amountNum > mainBalance) return setError(`Insufficient. Main vault only has $${mainBalance.toFixed(2)}`);
+    if (!amountNum || amountNum <= 0) return setError("Enter a valid USDC amount");
+    if (amountNum > mainBalance) return setError(`Insufficient. Main vault has $${mainBalance.toFixed(2)}`);
 
     try {
       setIsCreating(true);
-
       const stored = localStorage.getItem("matka_agents");
       const agents = stored ? JSON.parse(stored) : [];
       const newVaultId = agents.length + 1;
 
-      // Step 1: Initialize the sub-vault on-chain
-      // We call mainVault.initializeVault with vaultId but useMatka(0) doesn't know about the new vault.
-      // The correct pattern is to call the program directly via the provider:
-      // For hackathon: we save metadata and the chain calls happen via the page-level hook.
-      // Full on-chain flow requires instantiating useMatka(newVaultId) dynamically — handled via fundSubVault.
+      // STEP 1: Initialize sub-vault PDA on-chain
+      // This MUST happen before fundSubVault — the chain reads sub_vault.bump
+      // which only exists after initialization.
+      setStepMsg("1/3 Initializing sub-vault on-chain...");
+      await mainVault.initializeSubVault(newVaultId, AGENT_PUBKEY);
 
-      const newAgent = {
-        id: newVaultId,
-        name: name.trim(),
-        amount: amountNum,
-        category,
-        rules: {
-          discount: selectedRules.discount,
-          max_trade: selectedRules.max_trade_pct,
-          max_preipo: selectedRules.max_preipo_pct,
-          cooldown: selectedRules.cooldown,
-          slippage: selectedRules.slippage,
-        },
-        createdAt: Date.now(),
-        // fundSubVault will be called by the dedicated agent page
-        status: "active",
-      };
+      // STEP 2: Write strategy policy to chain
+      setStepMsg("2/3 Writing strategy policy to chain...");
+      await mainVault.updateSubVaultPolicy(newVaultId, {
+        maxTradePct: selectedRules.max_trade_pct,
+        maxPreipoPct: selectedRules.max_preipo_pct,
+        cooldownSecs: selectedRules.cooldown,
+        slippageBps: selectedRules.slippage,
+      });
 
-      localStorage.setItem("matka_agents", JSON.stringify([...agents, newAgent]));
-
-      // Trigger fund transfer from main vault to sub-vault
+      // STEP 3: Transfer USDC from Main Vault → Sub-Vault
+      setStepMsg("3/3 Funding sub-vault from Main Vault...");
       await mainVault.fundSubVault(newVaultId, amountNum);
+
+      // Save metadata to localStorage for UI listing
+      localStorage.setItem("matka_agents", JSON.stringify([
+        ...agents,
+        {
+          id: newVaultId,
+          name: name.trim(),
+          amount: amountNum,
+          category,
+          rules: {
+            discount: selectedRules.discount,
+            max_trade: selectedRules.max_trade_pct,
+            max_preipo: selectedRules.max_preipo_pct,
+            cooldown: selectedRules.cooldown,
+            slippage: selectedRules.slippage,
+          },
+          createdAt: Date.now(),
+          status: "active",
+        },
+      ]));
 
       window.location.href = `/agents/${newVaultId}`;
     } catch (e: any) {
       setError(e.message ?? "Failed to create agent vault");
+      setStepMsg("");
     } finally {
       setIsCreating(false);
     }
@@ -112,13 +126,11 @@ export default function AgentsPage() {
       </div>
 
       <div className="grid grid-cols-5 gap-8">
-        {/* Form — 3 cols */}
         <div className="col-span-3 space-y-5">
           <div>
             <label className="text-gray-400 text-sm font-bold block mb-2">Agent Name</label>
             <input
-              type="text"
-              value={name}
+              type="text" value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. NEURAL HUNTER"
               className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white uppercase tracking-widest font-bold"
@@ -130,25 +142,23 @@ export default function AgentsPage() {
               Fund Amount (USDC — from Main Vault)
             </label>
             <input
-              type="number"
-              value={amount}
+              type="number" value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              max={mainBalance}
+              placeholder="0.00" max={mainBalance}
               className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white"
             />
             {parseFloat(amount) > mainBalance && (
-              <p className="text-red-500 text-xs mt-1">⚠ Exceeds Main Vault balance of ${mainBalance.toFixed(2)}</p>
+              <p className="text-red-500 text-xs mt-1">
+                ⚠ Exceeds Main Vault balance of ${mainBalance.toFixed(2)}
+              </p>
             )}
           </div>
 
           <div>
             <label className="text-gray-400 text-sm font-bold block mb-2">Strategy</label>
             <div className="grid grid-cols-3 gap-3">
-              {Object.keys(CATEGORIES).map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setCategory(cat as keyof typeof CATEGORIES)}
+              {(Object.keys(CATEGORIES) as (keyof typeof CATEGORIES)[]).map((cat) => (
+                <button key={cat} onClick={() => setCategory(cat)}
                   className={`p-3 rounded-lg border text-sm font-bold transition-all text-left ${
                     category === cat
                       ? "border-blue-500 bg-blue-900/30 text-blue-300"
@@ -166,15 +176,25 @@ export default function AgentsPage() {
               ⚠ {error}
             </div>
           )}
+          {stepMsg && (
+            <div className="bg-blue-900/20 border border-blue-700 text-blue-300 p-3 rounded-lg text-sm">
+              ⏳ {stepMsg}
+            </div>
+          )}
 
           <button
             onClick={handleCreate}
             disabled={isCreating || !mainVault.vaultExists}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold py-4 rounded-lg transition-colors"
           >
-            {isCreating ? "Deploying Agent..." : "Create & Fund Agent Vault →"}
+            {isCreating ? "Deploying Agent (3 txs)..." : "Create & Fund Agent Vault →"}
           </button>
 
+          {isCreating && (
+            <p className="text-gray-500 text-xs text-center">
+              3 transactions required — approve each in your wallet.
+            </p>
+          )}
           {!mainVault.vaultExists && (
             <p className="text-yellow-600 text-sm text-center">
               You need to <Link href="/home" className="underline">create a Main Vault</Link> first.
@@ -182,10 +202,11 @@ export default function AgentsPage() {
           )}
         </div>
 
-        {/* Rules Preview — 2 cols */}
         <div className="col-span-2">
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 sticky top-20">
-            <h3 className="font-bold text-blue-400 uppercase tracking-wider text-xs mb-4">On-Chain Policy</h3>
+            <h3 className="font-bold text-blue-400 uppercase tracking-wider text-xs mb-4">
+              On-Chain Policy (written in Tx 2)
+            </h3>
             <div className="space-y-3">
               {[
                 { label: "Buy when discount exceeds", value: `${selectedRules.discount}%` },
@@ -202,6 +223,12 @@ export default function AgentsPage() {
               ))}
             </div>
             <p className="text-gray-600 text-xs mt-4">{selectedRules.description}</p>
+            <div className="mt-5 text-xs text-gray-600 bg-gray-800/50 rounded-lg p-3 space-y-1">
+              <div className="text-gray-400 font-bold mb-1">3 on-chain transactions:</div>
+              <div>1️⃣ initializeVault (create sub-vault PDA)</div>
+              <div>2️⃣ updatePolicy (write strategy rules)</div>
+              <div>3️⃣ fundSubVault (transfer USDC)</div>
+            </div>
           </div>
         </div>
       </div>

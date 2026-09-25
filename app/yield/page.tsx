@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import Link from "next/link";
 import { useMatka } from "../lib/useMatka";
+import { getVaultBalance, getDeployedToYield } from "../lib/program";
 import ClientWalletButton from "../components/ClientWalletButton";
 
 export default function YieldPage() {
@@ -24,12 +25,8 @@ export default function YieldPage() {
     );
   }
 
-  const totalDeposited = mainVault.vault
-    ? mainVault.vault.total_deposited_usdc.toNumber() / 1_000_000
-    : 0;
-  const deployedToYield = mainVault.vault
-    ? mainVault.vault.deployed_to_yield.toNumber() / 1_000_000
-    : 0;
+  const totalDeposited = getVaultBalance(mainVault.vault);
+  const deployedToYield = getDeployedToYield(mainVault.vault);
   const mockApy = 8.4;
   const mockEarned = deployedToYield * (mockApy / 100) * (15 / 365); // ~15 days
 
