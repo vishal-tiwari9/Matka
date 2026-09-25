@@ -32,6 +32,8 @@ interface TradeEvent {
   };
 }
 
+
+
 // Global store for in-memory events
 const globalAny: any = global;
 if (!globalAny.tradeEvents) {
