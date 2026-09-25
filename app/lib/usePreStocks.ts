@@ -42,8 +42,8 @@ export function usePreStocks() {
       tokenPrice: null,
       markPrice: token.mockMarkPriceCents / 100,
       premium: null,
-      priceChange24h: (Math.random() - 0.48) * 8,
-      volume24h: Math.floor(Math.random() * 5_000_000) + 100_000,
+      priceChange24h: 0,
+      volume24h: 0,
       isLoading: true,
     }))
   );
@@ -75,6 +75,8 @@ export function usePreStocks() {
             tokenPrice,
             markPrice,
             premium,
+            priceChange24h: token.priceChange24h === 0 ? (Math.random() - 0.48) * 8 : token.priceChange24h,
+            volume24h: token.volume24h === 0 ? Math.floor(Math.random() * 5_000_000) + 100_000 : token.volume24h,
             isLoading: false,
           };
         })
@@ -89,6 +91,8 @@ export function usePreStocks() {
             ...token,
             tokenPrice: parseFloat(mockTokenPrice.toFixed(4)),
             premium: parseFloat(premium.toFixed(2)),
+            priceChange24h: token.priceChange24h === 0 ? (Math.random() - 0.48) * 8 : token.priceChange24h,
+            volume24h: token.volume24h === 0 ? Math.floor(Math.random() * 5_000_000) + 100_000 : token.volume24h,
             isLoading: false,
           };
         })

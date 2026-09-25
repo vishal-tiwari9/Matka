@@ -30,7 +30,16 @@ export function getPolicyPda(vaultPda: PublicKey): [PublicKey, number] {
 export function getMatkaProgram(
   provider: anchor.AnchorProvider
 ): anchor.Program<any> {
-  return new anchor.Program(IDL as any, provider);
+  // SolPG exports IDLs using "publicKey" which causes Anchor 0.32 to crash.
+  // It also exports custom types as "defined": "Name" instead of "defined": { "name": "Name" }.
+  // We string replace both to be compatible with Anchor 0.30+.
+  let idlString = JSON.stringify(IDL).replace(/"publicKey"/g, '"pubkey"');
+  idlString = idlString.replace(/"defined":\s*"([^"]+)"/g, '"defined":{"name":"$1"}');
+  const parsedIdl = JSON.parse(idlString);
+
+  // In Anchor v0.30+, IDL needs an explicit `address` field or it throws a '_bn' reading error
+  const idlWithAddress = { ...parsedIdl, address: MATKA_PROGRAM_ID.toBase58() };
+  return new anchor.Program(idlWithAddress as any, provider);
 }
 
 // ── On-chain data types (snake_case matches IDL) ──────────────
