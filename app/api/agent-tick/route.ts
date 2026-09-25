@@ -16,6 +16,7 @@ interface TradeEvent {
   agentName: string;
   type: 'BUY' | 'SKIP' | 'DECLINED';
   symbol: string;
+  mint?: string;                    // ← add this
   tokenPrice: number;
   markPrice: number;
   discountPct: number;
@@ -24,6 +25,11 @@ interface TradeEvent {
   reason: string;
   timestamp: number;
   txHash?: string;
+  jupiterRoute?: {                  // optional: make this typed too
+    minOut: number;
+    priceImpact: string;
+    provider: string;
+  };
 }
 
 // Global store for in-memory events
