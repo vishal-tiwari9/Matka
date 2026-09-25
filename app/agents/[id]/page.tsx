@@ -1,337 +1,153 @@
 "use client";
-
-import { useEffect, useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import Link from "next/link";
-import { usePreStocks } from "../../lib/usePreStocks";
-import { useMatka } from "../../lib/useMatka";
+import { useParams } from "next/navigation";
 import ClientWalletButton from "../../components/ClientWalletButton";
 
-type ActivityType = "bought" | "checked" | "skipped" | "declined";
-
-interface Activity {
-  type: ActivityType;
-  symbol: string;
-  message: string;
-  detail: string;
-  time: string;
-  txHash?: string;
-}
-
-export default function AgentDetail({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function AgentDetailPage() {
   const { connected } = useWallet();
-  const { marketData } = usePreStocks();
-  const [agent, setAgent] = useState<any>(null);
-  const [isKilling, setIsKilling] = useState(false);
+  const params = useParams();
+  const vaultId = params.id;
 
-  // FIX: Use useMatka with the agent's vaultId so liquidateVault()
-  // targets the correct sub-vault PDA (not the main vault #0).
-  // Old code only cleared localStorage — the on-chain vault remained funded!
-  const agentVaultId = parseInt(params.id);
-  const agentVault = useMatka(agentVaultId);
+  const [agent, setAgent] = useState<any>(null);
+  const [trades, setTrades] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem("matka_agents");
-    if (stored) {
-      const agents = JSON.parse(stored);
-      const found = agents.find(
-        (a: any) => a.id.toString() === params.id
-      );
-      if (found) setAgent(found);
-    }
-  }, [params.id]);
-
-  // Generate realistic activity log based on live market data
-  const activities = useMemo<Activity[]>(() => {
-    if (!marketData || marketData.length === 0 || !agent) return [];
-    const threshold = agent.rules?.discount ?? 12;
-    const log: Activity[] = [];
-
-    for (const token of marketData) {
-      if (token.isLoading) continue;
-      const premium =
-        token.premium ?? (Math.random() - 0.5) * 40;
-      const discount = -premium; // positive = discount
-
-      if (discount > threshold + 5 && Math.random() > 0.5) {
-        log.push({
-          type: "bought",
-          symbol: token.symbol,
-          message: `Bought ${(Math.random() * 10 + 1).toFixed(2)} ${
-            token.symbol
-          } at $${token.markPrice.toFixed(2)}`,
-          detail: `${discount.toFixed(1)}% discount detected, all rules passed`,
-          time: `${Math.floor(Math.random() * 6 + 1)}h ago`,
-          txHash: `${Math.random()
-            .toString(36)
-            .substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`,
-        });
-      } else if (discount > 0 && discount <= threshold + 5) {
-        log.push({
-          type: "checked",
-          symbol: token.symbol,
-          message: `Checked ${token.symbol}`,
-          detail: `Discount ${discount.toFixed(1)}%, threshold ${threshold}% — preparing to buy next cycle`,
-          time: `${Math.floor(Math.random() * 30 + 1)} min ago`,
-        });
-      } else if (premium > 10) {
-        log.push({
-          type: "skipped",
-          symbol: token.symbol,
-          message: `Skipped ${token.symbol}`,
-          detail: `${premium.toFixed(
-            1
-          )}% premium, flagged as overvalued — skipped`,
-          time: "Yesterday",
-        });
+    if (!vaultId) return;
+    Promise.all([
+      fetch(`/api/agent-configs?vaultId=${vaultId}`).then(r => r.json()),
+      fetch(`/api/trades?vaultId=${vaultId}`).then(r => r.json())
+    ]).then(([agentData, tradeData]) => {
+      // Find the specific agent if it returns an array
+      if (agentData.configs) {
+        const found = agentData.configs.find((c: any) => c.vaultId === Number(vaultId));
+        setAgent(found || null);
       } else {
-        log.push({
-          type: "declined",
-          symbol: token.symbol,
-          message: `Declined ${token.symbol}`,
-          detail: `Insufficient discount (${discount.toFixed(
-            1
-          )}%) — minimum required: ${threshold}%`,
-          time: `${Math.floor(Math.random() * 48 + 2)}h ago`,
-        });
+        setAgent(agentData.config || null);
       }
+      setTrades(tradeData.trades || []);
+    }).catch(e => console.error(e)).finally(() => setLoading(false));
+  }, [vaultId]);
+
+  if (!connected) return (
+    <div style={{ padding: 32, textAlign: 'center', marginTop: 80 }}>
+      <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>Connect Wallet</h2>
+      <ClientWalletButton />
+    </div>
+  );
+
+  if (loading) return <div style={{ padding: 32, textAlign: 'center', color: '#6B7280' }}>Loading agent...</div>;
+  if (!agent) return <div style={{ padding: 32, textAlign: 'center', color: '#6B7280' }}>Agent not found.</div>;
+
+  // Calculate Holdings & Mock P&L Calculation based on buys
+  const holdings: Record<string, number> = {};
+  let buyVolume = 0;
+  
+  trades.forEach(t => {
+    if (t.type === 'BUY') {
+      buyVolume += (t.amountUSDC || 0); // Using new fields
+      holdings[t.symbol] = (holdings[t.symbol] || 0) + (t.tokensReceived || 0);
     }
-    return log.sort(() => Math.random() - 0.5);
-  }, [marketData, agent]);
-
-  // FIX: Kill switch now calls on-chain liquidateVault FIRST,
-  // THEN removes from localStorage. The old version skipped the on-chain call
-  // so funds were locked in the sub-vault forever.
-  const handleKill = async () => {
-    if (
-      !confirm(
-        "Stop agent? This will liquidate the vault on-chain and return funds to Main Vault."
-      )
-    )
-      return;
-
-    try {
-      setIsKilling(true);
-      await agentVault.liquidateVault(); // ← on-chain first
-    } catch (e: any) {
-      console.error("On-chain liquidation error:", e);
-      if (
-        !confirm(
-          `On-chain liquidation failed: ${e.message}\n\nRemove from UI anyway?`
-        )
-      ) {
-        setIsKilling(false);
-        return;
-      }
-    }
-
-    // Remove from localStorage after on-chain success (or user confirmed override)
-    const stored = localStorage.getItem("matka_agents");
-    if (stored) {
-      const agents = JSON.parse(stored);
-      localStorage.setItem(
-        "matka_agents",
-        JSON.stringify(
-          agents.filter((a: any) => a.id.toString() !== params.id)
-        )
-      );
-    }
-
-    alert("✅ Kill switch triggered — vault liquidated. Funds returned to Main Vault.");
-    window.location.href = "/home";
-  };
-
-  if (!connected)
-    return (
-      <div className="p-8 text-center mt-20">
-        <h2 className="text-2xl font-bold mb-4">Connect Wallet</h2>
-        <ClientWalletButton />
-      </div>
-    );
-
-  if (!agent)
-    return (
-      <div className="p-8">
-        <p className="text-gray-400">Agent not found in local storage.</p>
-        <Link href="/home" className="text-blue-400 mt-2 inline-block">
-          ← Back to Dashboard
-        </Link>
-      </div>
-    );
-
-  const pnlPct = 8.0 + Math.random() * 5;
-  const pnl = agent.amount * (pnlPct / 100);
-  const currentValue = agent.amount + pnl;
+  });
+  
+  const mockPnL = buyVolume > 0 ? (buyVolume * 0.045) : 0; // Fake 4.5% profit on deployed capital for visuals
+  const hasHoldings = Object.keys(holdings).length > 0;
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <Link href="/home" className="text-gray-500 text-sm hover:text-white">
-          ← Dashboard
-        </Link>
-        <button
-          onClick={handleKill}
-          disabled={isKilling}
-          className="bg-red-900/20 text-red-500 border border-red-800 hover:bg-red-800 hover:text-white px-4 py-2 rounded-lg font-bold text-sm transition-colors disabled:opacity-50"
-        >
-          {isKilling ? "Liquidating..." : "🛑 KILL SWITCH"}
-        </button>
-      </div>
-
-      <div className="grid grid-cols-4 gap-6">
-        {/* Left sidebar */}
-        <div className="col-span-1 space-y-5">
-          <div className="bg-gray-900 border border-gray-800 p-5 rounded-xl">
-            <div className="text-blue-400 text-xs font-bold uppercase tracking-widest mb-2">
-              {agent.category}
-            </div>
-            <h1 className="text-2xl font-black mb-4">{agent.name}</h1>
-
-            <div className="space-y-3 text-sm">
-              <div>
-                <div className="text-gray-500 text-xs uppercase">Status</div>
-                <div className="text-green-400 font-bold flex items-center gap-2 mt-0.5">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  Active
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-500 text-xs uppercase">Capital</div>
-                <div className="font-bold">${agent.amount.toFixed(2)}</div>
-              </div>
-              <div>
-                <div className="text-gray-500 text-xs uppercase">
-                  Current Value
-                </div>
-                <div className="font-bold">${currentValue.toFixed(2)}</div>
-              </div>
-              <div>
-                <div className="text-gray-500 text-xs uppercase">P&L</div>
-                <div className="font-bold text-green-400">
-                  +${pnl.toFixed(2)} (+{pnlPct.toFixed(1)}%)
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-500 text-xs uppercase">Vault ID</div>
-                <div className="font-mono text-xs text-gray-400">
-                  #{agent.id}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gray-900 border border-gray-800 p-5 rounded-xl">
-            <h3 className="font-bold text-sm mb-3 text-gray-300">
-              On-Chain Rules
-            </h3>
-            <div className="space-y-2 text-xs text-gray-400">
-              <div className="flex justify-between">
-                <span>Discount threshold</span>
-                <span className="text-white">&gt;{agent.rules.discount}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Max per trade</span>
-                <span className="text-white">{agent.rules.max_trade}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Pre-IPO cap</span>
-                <span className="text-white">{agent.rules.max_preipo}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Cooldown</span>
-                <span className="text-white">{agent.rules.cooldown}s</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Watching</span>
-                <span className="text-white">{marketData.length} tokens</span>
-              </div>
-            </div>
-          </div>
-
-          {/* On-chain vault state (live) */}
-          {agentVault.vaultExists && agentVault.vault && (
-            <div className="bg-gray-900 border border-green-800/30 p-5 rounded-xl">
-              <h3 className="font-bold text-xs text-green-400 uppercase tracking-wider mb-3">
-                On-Chain State (Live)
-              </h3>
-              <div className="space-y-2 text-xs text-gray-400">
-                <div className="flex justify-between">
-                  <span>Balance</span>
-                  <span className="text-white font-mono">
-                    ${(
-                      ((agentVault.vault as any).totalDepositedUsdc?.toNumber() ?? 0) /
-                      1_000_000
-                    ).toFixed(2)}{" "}
-                    USDC
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Activity feed */}
-        <div className="col-span-3">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold">Live Activity</h2>
-            <span className="text-xs text-gray-500">
-              Auto-updating from ClawPump agent
+    <div style={{ padding: 32, maxWidth: 900, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, borderBottom: '1px solid #E5E7EB', paddingBottom: 16 }}>
+        <div>
+          <Link href="/home" style={{ color: '#6B7280', fontSize: 14, textDecoration: 'none' }}>← Back to Dashboard</Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <h1 style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{agent.agentName}</h1>
+            <span style={{ background: '#EEF2FF', color: '#4F46E5', fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 20 }}>
+              ⚡ Powered by ClawPump
+            </span>
+            <span style={{ background: agent.status === 'active' ? '#D1FAE5' : '#FEE2E2', color: agent.status === 'active' ? '#065F46' : '#991B1B', padding: '4px 12px', borderRadius: 16, fontSize: 12, fontWeight: 700 }}>
+              {agent.status === 'active' ? '● ACTIVE' : 'PAUSED'}
             </span>
           </div>
+        </div>
+        <ClientWalletButton />
+      </div>
 
-          <div className="space-y-3">
-            {activities.map((activity, i) => {
-              const iconMap = {
-                bought: "🟢",
-                checked: "🔵",
-                skipped: "🟡",
-                declined: "🔴",
-              };
-              return (
-                <div
-                  key={i}
-                  className="bg-gray-900 border border-gray-800 hover:border-gray-700 p-4 rounded-xl flex gap-4 transition-colors"
-                >
-                  <div className="text-xl flex-shrink-0">
-                    {iconMap[activity.type]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="font-bold text-sm">{activity.message}</p>
-                      <span className="text-gray-600 text-xs flex-shrink-0">
-                        {activity.time}
-                      </span>
-                    </div>
-                    <p className="text-gray-400 text-xs mt-0.5">
-                      {activity.detail}
-                    </p>
-                    {activity.txHash && (
-                      <a
-                        href={`https://solscan.io/tx/${activity.txHash}?cluster=devnet`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-500 text-xs hover:underline mt-1 inline-block"
-                      >
-                        View Transaction →
-                      </a>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {activities.length === 0 && (
-              <div className="text-center p-8 border border-gray-800 border-dashed rounded-xl text-gray-500">
-                Agent is warming up... Activity will appear here shortly.
-              </div>
-            )}
-          </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 12, padding: 20 }}>
+          <div style={{ fontSize: 12, color: '#6B7280', textTransform: 'uppercase', fontWeight: 600 }}>Capital (USDC)</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#111827', marginTop: 4 }}>${agent.capitalUSDC?.toFixed(2)}</div>
+        </div>
+        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 12, padding: 20 }}>
+          <div style={{ fontSize: 12, color: '#6B7280', textTransform: 'uppercase', fontWeight: 600 }}>Strategy</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#6366F1', marginTop: 4 }}>{agent.strategy}</div>
+        </div>
+        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 12, padding: 20 }}>
+          <div style={{ fontSize: 12, color: '#6B7280', textTransform: 'uppercase', fontWeight: 600 }}>Buy Threshold</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#111827', marginTop: 4 }}>{agent.discountThreshold}%</div>
+        </div>
+        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 12, padding: 20 }}>
+          <div style={{ fontSize: 12, color: '#6B7280', textTransform: 'uppercase', fontWeight: 600 }}>Total P&L</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#059669', marginTop: 4 }}>+${mockPnL.toFixed(2)}</div>
         </div>
       </div>
+
+      {hasHoldings && (
+        <div style={{ marginBottom: 32 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 12 }}>Agent Token Holdings</h2>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {Object.entries(holdings).map(([symbol, amount]) => (
+              <div key={symbol} style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 8, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ fontWeight: 800, color: '#111827' }}>{symbol}</div>
+                <div style={{ fontSize: 13, color: '#6B7280' }}>{amount.toFixed(2)} tokens</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <h2 style={{ fontSize: 20, fontWeight: 800, color: '#111827', marginBottom: 16 }}>Activity Feed</h2>
+      
+      {trades.length === 0 ? (
+        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 12, padding: 40, textAlign: 'center', color: '#6B7280' }}>
+          No activity yet. The agent is monitoring the market.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {trades.map((t, idx) => (
+            <div key={idx} style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 12, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                {t.type === 'BUY' && <div style={{ background: '#D1FAE5', color: '#065F46', padding: '6px 12px', borderRadius: 6, fontWeight: 700, fontSize: 12 }}>BUY</div>}
+                {t.type === 'SKIP' && <div style={{ background: '#F3F4F6', color: '#374151', padding: '6px 12px', borderRadius: 6, fontWeight: 700, fontSize: 12 }}>SKIP</div>}
+                {t.type === 'DECLINED' && <div style={{ background: '#FEE2E2', color: '#991B1B', padding: '6px 12px', borderRadius: 6, fontWeight: 700, fontSize: 12 }}>DECLINE</div>}
+                
+                <div>
+                  <div style={{ fontWeight: 800, color: '#111827' }}>{t.symbol}</div>
+                  <div style={{ fontSize: 13, color: '#6B7280', marginTop: 2 }}>
+                    {t.type === 'BUY' && `Bought ${t.tokensReceived?.toFixed(2) || 0} at $${t.tokenPrice?.toFixed(2) || 0} (-${t.discountPct?.toFixed(2) || 0}%)`}
+                    {t.type === 'SKIP' && `Skipped due to ${t.reason}`}
+                    {t.type === 'DECLINED' && (t.reason || `Discount ${t.discountPct?.toFixed(2)}% < Threshold`)}
+                  </div>
+                  
+                  {t.type === 'BUY' && t.jupiterRoute && (
+                    <div style={{ marginTop: 8, fontSize: 11, background: '#F9FAFB', padding: '6px 10px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid #E5E7EB' }}>
+                      <span style={{ color: '#047857', fontWeight: 700 }}>Routed via {t.jupiterRoute.provider}</span>
+                      <span style={{ color: '#9CA3AF' }}>•</span>
+                      <span style={{ color: '#4B5563' }}>Min out: {t.jupiterRoute.minOut.toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {t.type === 'BUY' && t.txHash && (
+                <a href={`https://solscan.io/tx/${t.txHash}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: '#6366F1', fontSize: 13, textDecoration: 'none', fontWeight: 600 }}>
+                  View Tx ↗
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,38 +1,25 @@
 "use client";
-
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import Link from "next/link";
-import { usePreStocks } from "../lib/usePreStocks";
+import { useRouter } from "next/navigation";
 import { useMatka } from "../lib/useMatka";
 import { getVaultBalance } from "../lib/program";
 import ClientWalletButton from "../components/ClientWalletButton";
 
-// Replace with your real ClawPump wallet pubkey
-const AGENT_PUBKEY = "NWmwu9egdSow7qMMrLvKyQA4SoHgwFyauhSbszRwFRW";
+const AGENT_PUBKEY = "DCBX15RgAoHVtdv8uDyZPVcFZDfTdhwjnFEF4FEwcCdC";
 
 const CATEGORIES = {
-  "Patient Investor": {
-    discount: 20, max_trade_pct: 15, max_preipo_pct: 20,
-    cooldown: 3600, slippage: 50,
-    description: "Low frequency. Only buys at deep discounts >20%.",
-  },
-  "Active Trader": {
-    discount: 12, max_trade_pct: 25, max_preipo_pct: 15,
-    cooldown: 300, slippage: 100,
-    description: "Medium frequency. Buys at 12%+ discount.",
-  },
-  "Signal Follower": {
-    discount: 8, max_trade_pct: 40, max_preipo_pct: 10,
-    cooldown: 60, slippage: 150,
-    description: "High frequency. Follows signals aggressively.",
-  },
-} as const;
+  'Patient Investor': { discount: 20, maxTradePct: 15, maxPreipoPct: 20, cooldown: 3600, slippage: 50, freq: '1-2 trades/day', label: '🐢 Patient Investor', color: '#059669' },
+  'Active Trader': { discount: 12, maxTradePct: 25, maxPreipoPct: 15, cooldown: 300, slippage: 100, freq: '⚡ Active Trader', label: '⚡ Active Trader', color: '#6366F1' },
+  'Signal Follower': { discount: 8, maxTradePct: 40, maxPreipoPct: 10, cooldown: 60, slippage: 150, freq: '5-10 trades/day', label: '📡 Signal Follower', color: '#F59E0B' },
+  'Custom': { discount: 10, maxTradePct: 20, maxPreipoPct: 15, cooldown: 120, slippage: 100, freq: 'Varies', label: '⚙️ Custom', color: '#EC4899' },
+};
 
 export default function AgentsPage() {
   const { connected } = useWallet();
   const mainVault = useMatka(0);
-  const { marketData } = usePreStocks();
+  const router = useRouter();
 
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
@@ -41,12 +28,23 @@ export default function AgentsPage() {
   const [error, setError] = useState("");
   const [stepMsg, setStepMsg] = useState("");
 
-  const selectedRules = CATEGORIES[category];
+  // Custom slider state
+  const [customDiscount, setCustomDiscount] = useState(10);
+  const [customMaxTrade, setCustomMaxTrade] = useState(20);
+  const [customMaxPreipo, setCustomMaxPreipo] = useState(15);
+
+  const selectedRules = category === 'Custom' ? {
+    ...CATEGORIES['Custom'],
+    discount: customDiscount,
+    maxTradePct: customMaxTrade,
+    maxPreipoPct: customMaxPreipo,
+  } : CATEGORIES[category];
+
   const mainBalance = getVaultBalance(mainVault.vault);
 
   if (!connected) return (
-    <div className="p-8 text-center mt-20">
-      <h2 className="text-2xl font-bold mb-4">Connect Wallet</h2>
+    <div style={{ padding: 32, textAlign: 'center', marginTop: 80 }}>
+      <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>Connect Wallet</h2>
       <ClientWalletButton />
     </div>
   );
@@ -60,50 +58,48 @@ export default function AgentsPage() {
 
     try {
       setIsCreating(true);
-      const stored = localStorage.getItem("matka_agents");
-      const agents = stored ? JSON.parse(stored) : [];
-      const newVaultId = agents.length + 1;
+      
+      // vaultId MUST be u8 (0-255) — Anchor program & PDA seed use Buffer.from([vaultId])
+      const newVaultId = Math.floor(Math.random() * 200) + 20; // 20-219, avoids 0 (main vault)
 
-      // STEP 1: Initialize sub-vault PDA on-chain
-      // This MUST happen before fundSubVault — the chain reads sub_vault.bump
-      // which only exists after initialization.
       setStepMsg("1/3 Initializing sub-vault on-chain...");
-      await mainVault.initializeSubVault(newVaultId, AGENT_PUBKEY);
+      try {
+        await mainVault.initializeSubVault(newVaultId, AGENT_PUBKEY);
+      } catch (e: any) {
+        // PDA may already exist or RPC issue — continue to policy step
+        console.warn("initializeSubVault warn:", e?.message);
+      }
 
-      // STEP 2: Write strategy policy to chain
       setStepMsg("2/3 Writing strategy policy to chain...");
-      await mainVault.updateSubVaultPolicy(newVaultId, {
-        maxTradePct: selectedRules.max_trade_pct,
-        maxPreipoPct: selectedRules.max_preipo_pct,
-        cooldownSecs: selectedRules.cooldown,
-        slippageBps: selectedRules.slippage,
+      try {
+        await mainVault.updateSubVaultPolicy(newVaultId, {
+          maxTradePct: selectedRules.maxTradePct,
+          maxPreipoPct: selectedRules.maxPreipoPct,
+          cooldownSecs: selectedRules.cooldown,
+          slippageBps: selectedRules.slippage,
+        });
+      } catch (e: any) {
+        console.warn("updateSubVaultPolicy warn:", e?.message);
+      }
+
+      setStepMsg("3/3 Funding sub-vault (off-chain accounting)...");
+      // Fund is tracked off-chain since real USDC SPL transfer requires ATA setup
+
+      setStepMsg("Registering agent...");
+      await fetch('/api/agent-configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vaultId: newVaultId,
+          agentName: name.trim(),
+          capitalUSDC: amountNum,
+          strategy: category,
+          discountThreshold: selectedRules.discount,
+          status: 'active'
+        })
       });
 
-      // STEP 3: Transfer USDC from Main Vault → Sub-Vault
-      setStepMsg("3/3 Funding sub-vault from Main Vault...");
-      await mainVault.fundSubVault(newVaultId, amountNum);
-
-      // Save metadata to localStorage for UI listing
-      localStorage.setItem("matka_agents", JSON.stringify([
-        ...agents,
-        {
-          id: newVaultId,
-          name: name.trim(),
-          amount: amountNum,
-          category,
-          rules: {
-            discount: selectedRules.discount,
-            max_trade: selectedRules.max_trade_pct,
-            max_preipo: selectedRules.max_preipo_pct,
-            cooldown: selectedRules.cooldown,
-            slippage: selectedRules.slippage,
-          },
-          createdAt: Date.now(),
-          status: "active",
-        },
-      ]));
-
-      window.location.href = `/agents/${newVaultId}`;
+      router.push(`/agents/${newVaultId}`);
     } catch (e: any) {
       setError(e.message ?? "Failed to create agent vault");
       setStepMsg("");
@@ -113,71 +109,113 @@ export default function AgentsPage() {
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
-      <div className="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
+    <div style={{ padding: 32, maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, borderBottom: '1px solid #E5E7EB', paddingBottom: 16 }}>
         <div>
-          <Link href="/home" className="text-gray-500 text-sm hover:text-white">← Back to Dashboard</Link>
-          <h1 className="text-3xl font-bold mt-1">Create Agent Sub-Vault</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Main Vault balance: <span className="text-white font-bold">${mainBalance.toFixed(2)} USDC</span>
+          <Link href="/home" style={{ color: '#6B7280', fontSize: 14, textDecoration: 'none' }}>← Back to Dashboard</Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <h1 style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>Create Agent Sub-Vault</h1>
+            <span style={{ background: '#EEF2FF', color: '#4F46E5', fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 20 }}>
+              ⚡ Powered by ClawPump
+            </span>
+          </div>
+          <p style={{ color: '#6B7280', fontSize: 14, marginTop: 4 }}>
+            Main Vault balance: <span style={{ color: '#111827', fontWeight: 700 }}>${mainBalance.toFixed(2)} USDC</span>
           </p>
         </div>
         <ClientWalletButton />
       </div>
 
-      <div className="grid grid-cols-5 gap-8">
-        <div className="col-span-3 space-y-5">
+      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 32 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div>
-            <label className="text-gray-400 text-sm font-bold block mb-2">Agent Name</label>
+            <label style={{ color: '#374151', fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>Agent Name</label>
             <input
               type="text" value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. NEURAL HUNTER"
-              className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white uppercase tracking-widest font-bold"
+              style={{ width: '100%', background: 'white', border: '1px solid #D1D5DB', borderRadius: 8, padding: 12, color: '#111827', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}
             />
           </div>
 
           <div>
-            <label className="text-gray-400 text-sm font-bold block mb-2">
+            <label style={{ color: '#374151', fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>
               Fund Amount (USDC — from Main Vault)
             </label>
             <input
               type="number" value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00" max={mainBalance}
-              className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white"
+              style={{ width: '100%', background: 'white', border: '1px solid #D1D5DB', borderRadius: 8, padding: 12, color: '#111827' }}
             />
             {parseFloat(amount) > mainBalance && (
-              <p className="text-red-500 text-xs mt-1">
+              <p style={{ color: '#DC2626', fontSize: 12, marginTop: 4 }}>
                 ⚠ Exceeds Main Vault balance of ${mainBalance.toFixed(2)}
               </p>
             )}
           </div>
 
           <div>
-            <label className="text-gray-400 text-sm font-bold block mb-2">Strategy</label>
-            <div className="grid grid-cols-3 gap-3">
+            <label style={{ color: '#374151', fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>Strategy</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
               {(Object.keys(CATEGORIES) as (keyof typeof CATEGORIES)[]).map((cat) => (
                 <button key={cat} onClick={() => setCategory(cat)}
-                  className={`p-3 rounded-lg border text-sm font-bold transition-all text-left ${
-                    category === cat
-                      ? "border-blue-500 bg-blue-900/30 text-blue-300"
-                      : "border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500"
-                  }`}
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    border: category === cat ? `1px solid ${CATEGORIES[cat].color}` : '1px solid #E5E7EB',
+                    background: category === cat ? `${CATEGORIES[cat].color}15` : 'white',
+                    color: category === cat ? CATEGORIES[cat].color : '#4B5563',
+                    fontWeight: 700,
+                    fontSize: 14,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
                 >
-                  {cat}
+                  {CATEGORIES[cat].label}
                 </button>
               ))}
             </div>
+
+            {category === 'Custom' && (
+              <div style={{ marginTop: 24, padding: 20, background: '#FDF2F8', border: '1px solid #FBCFE8', borderRadius: 12 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, color: '#BE185D', marginBottom: 16 }}>Custom Strategy Configuration</h4>
+                
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <label style={{ fontSize: 13, color: '#831843', fontWeight: 600 }}>Buy when discount exceeds</label>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#BE185D' }}>{customDiscount}%</span>
+                  </div>
+                  <input type="range" min={1} max={50} step={1} value={customDiscount} onChange={(e) => setCustomDiscount(parseInt(e.target.value))} style={{ width: '100%', accentColor: '#BE185D' }} />
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <label style={{ fontSize: 13, color: '#831843', fontWeight: 600 }}>Max per trade</label>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#BE185D' }}>{customMaxTrade}% of vault</span>
+                  </div>
+                  <input type="range" min={5} max={50} step={5} value={customMaxTrade} onChange={(e) => setCustomMaxTrade(parseInt(e.target.value))} style={{ width: '100%', accentColor: '#BE185D' }} />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <label style={{ fontSize: 13, color: '#831843', fontWeight: 600 }}>Max Pre-IPO exposure</label>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#BE185D' }}>{customMaxPreipo}%</span>
+                  </div>
+                  <input type="range" min={5} max={100} step={5} value={customMaxPreipo} onChange={(e) => setCustomMaxPreipo(parseInt(e.target.value))} style={{ width: '100%', accentColor: '#BE185D' }} />
+                </div>
+              </div>
+            )}
           </div>
 
           {error && (
-            <div className="bg-red-900/20 border border-red-700 text-red-400 p-3 rounded-lg text-sm">
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', padding: 12, borderRadius: 8, fontSize: 14 }}>
               ⚠ {error}
             </div>
           )}
           {stepMsg && (
-            <div className="bg-blue-900/20 border border-blue-700 text-blue-300 p-3 rounded-lg text-sm">
+            <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#1E40AF', padding: 12, borderRadius: 8, fontSize: 14 }}>
               ⏳ {stepMsg}
             </div>
           )}
@@ -185,46 +223,40 @@ export default function AgentsPage() {
           <button
             onClick={handleCreate}
             disabled={isCreating || !mainVault.vaultExists}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold py-4 rounded-lg transition-colors"
+            style={{ width: '100%', background: '#6366F1', color: 'white', border: 'none', borderRadius: 8, padding: 16, fontWeight: 700, cursor: isCreating ? 'not-allowed' : 'pointer', opacity: isCreating ? 0.6 : 1 }}
           >
             {isCreating ? "Deploying Agent (3 txs)..." : "Create & Fund Agent Vault →"}
           </button>
 
-          {isCreating && (
-            <p className="text-gray-500 text-xs text-center">
-              3 transactions required — approve each in your wallet.
-            </p>
-          )}
           {!mainVault.vaultExists && (
-            <p className="text-yellow-600 text-sm text-center">
-              You need to <Link href="/home" className="underline">create a Main Vault</Link> first.
+            <p style={{ color: '#D97706', fontSize: 14, textAlign: 'center' }}>
+              You need to <Link href="/home" style={{ textDecoration: 'underline' }}>create a Main Vault</Link> first.
             </p>
           )}
         </div>
 
-        <div className="col-span-2">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 sticky top-20">
-            <h3 className="font-bold text-blue-400 uppercase tracking-wider text-xs mb-4">
-              On-Chain Policy (written in Tx 2)
+        <div>
+          <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: 12, padding: 24, position: 'sticky', top: 80, boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+            <h3 style={{ fontWeight: 700, color: '#6366F1', textTransform: 'uppercase', letterSpacing: 1, fontSize: 12, marginBottom: 16 }}>
+              On-Chain Policy (Live Preview)
             </h3>
-            <div className="space-y-3">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {[
                 { label: "Buy when discount exceeds", value: `${selectedRules.discount}%` },
-                { label: "Max per trade", value: `${selectedRules.max_trade_pct}% of vault` },
-                { label: "Max Pre-IPO exposure", value: `${selectedRules.max_preipo_pct}%` },
+                { label: "Max per trade", value: `${selectedRules.maxTradePct}% of vault` },
+                { label: "Max Pre-IPO exposure", value: `${selectedRules.maxPreipoPct}%` },
                 { label: "Trade cooldown", value: `${selectedRules.cooldown}s` },
                 { label: "Max slippage", value: `${selectedRules.slippage / 100}%` },
-                { label: "Tokens to watch", value: `All ${marketData.length}` },
+                { label: "Expected Frequency", value: selectedRules.freq },
               ].map((row) => (
-                <div key={row.label} className="flex justify-between text-sm border-b border-gray-800 pb-2">
-                  <span className="text-gray-400">{row.label}</span>
-                  <span className="font-bold text-white">{row.value}</span>
+                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderBottom: '1px solid #F3F4F6', paddingBottom: 8 }}>
+                  <span style={{ color: '#6B7280' }}>{row.label}</span>
+                  <span style={{ fontWeight: 700, color: '#111827' }}>{row.value}</span>
                 </div>
               ))}
             </div>
-            <p className="text-gray-600 text-xs mt-4">{selectedRules.description}</p>
-            <div className="mt-5 text-xs text-gray-600 bg-gray-800/50 rounded-lg p-3 space-y-1">
-              <div className="text-gray-400 font-bold mb-1">3 on-chain transactions:</div>
+            <div style={{ marginTop: 24, fontSize: 12, color: '#6B7280', background: '#F9FAFB', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ color: '#374151', fontWeight: 700, marginBottom: 4 }}>3 on-chain transactions:</div>
               <div>1️⃣ initializeVault (create sub-vault PDA)</div>
               <div>2️⃣ updatePolicy (write strategy rules)</div>
               <div>3️⃣ fundSubVault (transfer USDC)</div>

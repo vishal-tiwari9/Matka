@@ -1,117 +1,35 @@
 @import "tailwindcss";
 
-/* ── Matka Protocol Global Theme ─────────────────────── */
 :root {
-  --background: #080810;
-  --foreground: #f0f0ff;
-  --accent-blue: #3b82f6;
-  --accent-purple: #8b5cf6;
-  --accent-green: #10b981;
-  --card-bg: rgba(255, 255, 255, 0.04);
-  --card-border: rgba(255, 255, 255, 0.08);
-}
-
-* {
-  box-sizing: border-box;
+  --background: #F8F9FA;
+  --foreground: #111827;
+  --card: #FFFFFF;
+  --border: #E5E7EB;
+  --primary: #6366F1;
+  --muted: #6B7280;
 }
 
 body {
+  background-color: var(--background);
   color: var(--foreground);
-  background: var(--background);
-  background-image:
-    radial-gradient(ellipse at 20% 10%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
-  min-height: 100vh;
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
 }
 
-/* ── Custom Scrollbar ─────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
+* { box-sizing: border-box; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
 
-/* ── Glass Card ───────────────────────────────────────── */
-.glass-card {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
+/* Input styles */
+input[type=range] { accent-color: #6366F1; }
 
-/* ── Slider Styling ───────────────────────────────────── */
-input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  outline: none;
-  cursor: pointer;
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #3b82f6;
-  cursor: pointer;
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
-  transition: transform 0.15s;
-}
-input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
-}
-input[type="range"].green::-webkit-slider-thumb { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6); }
-input[type="range"].purple::-webkit-slider-thumb { background: #8b5cf6; box-shadow: 0 0 8px rgba(139, 92, 246, 0.6); }
-
-/* ── Animations ───────────────────────────────────────── */
-@keyframes fadeSlideIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.fade-in { animation: fadeSlideIn 0.3s ease-out forwards; }
-
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 4px 1px rgba(16, 185, 129, 0.4); }
-  50% { box-shadow: 0 0 10px 3px rgba(16, 185, 129, 0.7); }
-}
-.pulse-green { animation: pulse-glow 2s ease-in-out infinite; }
-
-/* ── Wallet Adapter Overrides ─────────────────────────── */
+/* Wallet button overrides - keep dark for contrast */
 .wallet-adapter-button {
-  background: rgba(255,255,255,0.07) !important;
-  border: 1px solid rgba(255,255,255,0.12) !important;
-  border-radius: 10px !important;
-  color: rgba(255,255,255,0.85) !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  height: 38px !important;
-  padding: 0 16px !important;
-  transition: all 0.2s !important;
-}
-.wallet-adapter-button:hover {
-  background: rgba(255,255,255,0.12) !important;
-  border-color: rgba(255,255,255,0.2) !important;
-}
-.wallet-adapter-modal-wrapper {
-  background: #0f0f1a !important;
-  border: 1px solid rgba(255,255,255,0.1) !important;
-  border-radius: 20px !important;
-}
-.wallet-adapter-modal-title { color: #f0f0ff !important; }
-.wallet-adapter-modal-list li { margin: 4px 0 !important; }
-
-
-.fade-in {
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+  background: #111827 !important;
+  border-radius: 8px !important;
+  font-size: 14px !important;
+  padding: 8px 16px !important;
+  font-weight: 600 !important;
 }

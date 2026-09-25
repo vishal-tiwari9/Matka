@@ -1,118 +1,70 @@
-// ============================================================
-//  usePreStocks.ts — Real-time PreStocks market data hook
-//
-//  Fetches live token price data from the Jupiter Price API v2
-//  using the actual on-chain mint addresses from tokens.ts.
-//
-//  Falls back to deterministic mock prices on devnet/failure
-//  so the UI always shows meaningful data.
-// ============================================================
+'use client';
 
-"use client";
+import { useState, useEffect } from 'react';
 
-import { useState, useEffect, useCallback } from "react";
-import { PRESTOCKS, PreStock } from "./tokens";
-
-export interface TokenMarketData extends PreStock {
-  tokenPrice: number | null;       // DEX price from Jupiter (USDC)
-  markPrice: number;               // Reference/mark price (USD cents / 100)
-  premium: number | null;          // (tokenPrice - markPrice) / markPrice * 100
-  priceChange24h: number;          // Mock 24h % change
-  volume24h: number;               // Mock 24h volume USD
-  isLoading: boolean;
+export interface NormalizedToken {
+  symbol: string;
+  name: string;
+  mint: string;
+  tokenPrice: number;
+  markPrice: number;
+  discountPct: number;
+  isDiscount: boolean;
+  isPremium: boolean;
+  volume24h: number;
+  holders: number;
 }
 
-function generatePriceHistory(basePrice: number, points = 30) {
-  const history = [];
-  let price = basePrice;
-  for (let i = points; i >= 0; i--) {
-    price = price * (1 + (Math.random() - 0.48) * 0.03);
-    history.push({
-      time: Date.now() - i * 3600_000,
-      price: parseFloat(price.toFixed(4)),
-    });
-  }
-  return history;
-}
+const FALLBACK_DATA: NormalizedToken[] = [
+  { symbol: 'ANTHROPIC', name: 'Anthropic', mint: 'Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw', markPrice: 315.50, tokenPrice: 228.50, discountPct: 27.6, isDiscount: true, isPremium: false, volume24h: 120000, holders: 450 },
+  { symbol: 'OPENAI', name: 'OpenAI', mint: 'PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF', markPrice: 180.00, tokenPrice: 165.20, discountPct: 8.2, isDiscount: true, isPremium: false, volume24h: 550000, holders: 1234 },
+  { symbol: 'ANDURIL', name: 'Anduril', mint: 'PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB', markPrice: 85.00, tokenPrice: 72.50, discountPct: 14.7, isDiscount: true, isPremium: false, volume24h: 89000, holders: 320 },
+  { symbol: 'NEURALINK', name: 'Neuralink', mint: 'PrekqLJvJ3qVdXmBGDiexvwUTF4rLFDa6HWS4HJbw9S', markPrice: 315.50, tokenPrice: 289.30, discountPct: 8.3, isDiscount: true, isPremium: false, volume24h: 420000, holders: 890 },
+  { symbol: 'FIGURE_AI', name: 'Figure AI', mint: 'PreZad18qfPtbxNpMtMuAuX2zVpvkEU8DnJx56faCWd', markPrice: 42.00, tokenPrice: 38.50, discountPct: 8.3, isDiscount: true, isPremium: false, volume24h: 75000, holders: 210 },
+  { symbol: 'KALSHI', name: 'Kalshi', mint: 'PreLWGkkeqG1s4HEfFZSy9moCrJ7btsHuUtfcCeoRua', markPrice: 12.50, tokenPrice: 11.80, discountPct: 5.6, isDiscount: true, isPremium: false, volume24h: 30000, holders: 150 },
+  { symbol: 'POLYMARKET', name: 'Polymarket', mint: 'Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP', markPrice: 8.90, tokenPrice: 8.10, discountPct: 9.0, isDiscount: true, isPremium: false, volume24h: 210000, holders: 670 },
+  { symbol: 'SPACEX', name: 'SpaceX', mint: 'PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh', markPrice: 225.00, tokenPrice: 186.50, discountPct: 17.1, isDiscount: true, isPremium: false, volume24h: 890000, holders: 2100 },
+  { symbol: 'XAI', name: 'xAI', mint: 'PreC1KtJ1sBPPqaeeqL6Qb15GTLCYVvyYEwxhdfTwfx', markPrice: 55.00, tokenPrice: 48.30, discountPct: 12.2, isDiscount: true, isPremium: false, volume24h: 150000, holders: 540 }
+];
 
 export function usePreStocks() {
-  const [marketData, setMarketData] = useState<TokenMarketData[]>(() =>
-    PRESTOCKS.map((token) => ({
-      ...token,
-      tokenPrice: null,
-      markPrice: token.mockMarkPriceCents / 100,
-      premium: null,
-      priceChange24h: 0,
-      volume24h: 0,
-      isLoading: true,
-    }))
-  );
-
-  const fetchPrices = useCallback(async () => {
-    const mints = PRESTOCKS.map((s) => s.mint).join(",");
-    try {
-      // Jupiter Price API v2 — live DEX aggregated price
-      const res = await fetch(
-        `https://api.jup.ag/price/v2?ids=${mints}&vsToken=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`,
-        { signal: AbortSignal.timeout(8000) }
-      );
-      const json = await res.json();
-      const data = json?.data ?? {};
-
-      setMarketData((prev) =>
-        prev.map((token) => {
-          const raw = data[token.mint];
-          const tokenPrice = raw?.price ? parseFloat(raw.price) : null;
-          const markPrice = token.markPrice;
-
-          let premium: number | null = null;
-          if (tokenPrice !== null && markPrice > 0) {
-            premium = ((tokenPrice - markPrice) / markPrice) * 100;
-          }
-
-          return {
-            ...token,
-            tokenPrice,
-            markPrice,
-            premium,
-            priceChange24h: token.priceChange24h === 0 ? (Math.random() - 0.48) * 8 : token.priceChange24h,
-            volume24h: token.volume24h === 0 ? Math.floor(Math.random() * 5_000_000) + 100_000 : token.volume24h,
-            isLoading: false,
-          };
-        })
-      );
-    } catch (err) {
-      // Devnet — Jupiter won't have real prices, apply deterministic mock
-      setMarketData((prev) =>
-        prev.map((token) => {
-          const mockTokenPrice = (token.mockMarkPriceCents / 100) * (1 + (Math.random() - 0.5) * 0.25);
-          const premium = ((mockTokenPrice - token.markPrice) / token.markPrice) * 100;
-          return {
-            ...token,
-            tokenPrice: parseFloat(mockTokenPrice.toFixed(4)),
-            premium: parseFloat(premium.toFixed(2)),
-            priceChange24h: token.priceChange24h === 0 ? (Math.random() - 0.48) * 8 : token.priceChange24h,
-            volume24h: token.volume24h === 0 ? Math.floor(Math.random() * 5_000_000) + 100_000 : token.volume24h,
-            isLoading: false,
-          };
-        })
-      );
-    }
-  }, []);
+  const [marketData, setMarketData] = useState<NormalizedToken[]>(FALLBACK_DATA);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+
+    async function fetchPrices() {
+      try {
+        const res = await fetch('/api/prestocks-prices');
+        if (!res.ok) throw new Error('Failed to fetch prices');
+        const data = await res.json();
+        
+        if (mounted && data.tokens) {
+          setMarketData(data.tokens);
+          setError(null);
+        }
+      } catch (err: any) {
+        if (mounted) {
+          setError(err.message);
+          // Keep fallback data if error
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
     fetchPrices();
-    const interval = setInterval(fetchPrices, 15_000); // refresh every 15s
-    return () => clearInterval(interval);
-  }, [fetchPrices]);
+    const interval = setInterval(fetchPrices, 30000); // 30 seconds
 
-  return { marketData, refresh: fetchPrices };
-}
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
-// Sparkline generator — used by chart components
-export function useSparkline(mint: string) {
-  const token = PRESTOCKS.find((t) => t.mint === mint);
-  const basePrice = token ? token.mockMarkPriceCents / 100 : 100;
-  const [history] = useState(() => generatePriceHistory(basePrice));
-  return history;
+  return { marketData, loading, error };
 }

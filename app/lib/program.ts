@@ -12,8 +12,10 @@ export const POLICY_SEED = anchor.utils.bytes.utf8.encode("policy");
 
 // ── PDA Helpers ───────────────────────────────────────────────
 export function getVaultPda(ownerPubkey: PublicKey, vaultId: number = 0): [PublicKey, number] {
+  // vaultId must be a valid u8 (0-255). Clamp defensively.
+  const safeId = Math.max(0, Math.min(255, Math.floor(vaultId)));
   return PublicKey.findProgramAddressSync(
-    [VAULT_SEED, ownerPubkey.toBuffer(), Buffer.from([vaultId])],
+    [VAULT_SEED, ownerPubkey.toBuffer(), Buffer.from([safeId])],
     MATKA_PROGRAM_ID
   );
 }
